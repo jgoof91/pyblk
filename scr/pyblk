@@ -1,37 +1,18 @@
-#!/bin/usr/python3
+#!/usr/bin/python3
 
 import os
-import sys
-import select
-import socket
+import Server
 
-SOCK_PATH = '/tmp/pyblk.sock'
-
+SOCK_PATH = os.getenv('PYBLK_SOCK_ADDR', default='/tmp/pyblk.sock')
+SHELL = os.getenv('PYBLK_SHELL', default='/bin/sh')
 
 def main():
     try:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.bind(SOCK_PATH)
-        conn_table = {}
-        with select.epoll as epoll:
-            epoll.register(sock.fileno(), select.EPOLLIN | select.EPOLLET)
-            while True:
-                events = epoll.poll(1)
-                for fileno, event in events:
-                    if fileno == sock.fileno():
-                        conn, addr = sock.accept()
-                        conn.setblocking(0)
-                        epoll.register(conn.fileno(), select.EPOLLIN | select.EPOLLET)
-                        conn_table[conn.fileno()] = [conn, addr]
-                    elif event & select.EPOLLIN:
-                        if fileno == sock.fileno():
-                            buff = sock.r
+        server = Server.Server(SOCK_PATH, SHELL)
+        server.loop()
+    finally:
+        server.close()
 
-        
-    except socket.error:
-        sock.close()
-        sys.stderr.write('FAIlED to connect to socket {SOCK_PATH}')
-        eixt(-1)
 
 if __name__ == '__main__':
     main()

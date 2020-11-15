@@ -11,64 +11,82 @@ class Align(Enum):
 
 
 class Module():
-    def __init__(self, name, script, interval, signal, align=Align.RIGHT, order=-1):
-        self.name = name
+    def __init__(self, script, interval, signal, align=Align.RIGHT, order=-1):
         self.script = script
-        self.interval = interval
-        self.signal = signal
+        self.interval = int(interval)
+        self.signal = int(signal)
         self.align = align
-        self.order = order
+        self.order = int(order)
 
         self.output = ''
         self.popen = None
 
+        self.alive = False
+        self.register = False
 
-    def poll(self):
-        if self.popen is None:
-            return None
-        ret = self.popen.poll()
-        if ret is None:
-            return None
-        self.popen = None
-        return self.popen.stdout.fileno()
+
+    def __str__(self):
+        return f'{self.script:10} {self.interval:4} {self.signal:2} {self.align:5} {self.order:2}'
+
+
+    @property
+    def fileno(self):
+        try:
+            return self.popen.stdout.fileno()
+        except ValueError as e:
+            return -1
+
+
+    @property
+    def is_alive(self):
+        if self.popen.poll() is None:
+            self.alive = True
+        else:
+            self.alive = False
+        return self.alive
+
+
+    def kill(self):
+        if not self.is_alive:
+            return
+        self.popen.terminate()
+        try:
+            self.popen.wait(5)
+        except TimeoutError as e:
+            self.popen.kill()
+        self.alive = False
 
 
     def read(self):
-        if self.popen:
-            try:
-                buff = self.popen.read()
-                if not buff:
-                    return
-                self.output = buff.decode('UTF-8')
-            except BlockingIOError:
-                return
+        buff = self.popen.stdout.read()
+        if not buff:
+            return False
+        self.output = buff.decode('UTF-8')
+        return True
     
 
     def run(self):
-        if self.popen:
-            return None
         try:
-            self.popen = subprocess.Popen(script, stdout=subprocess.PIPE)
-            return self.popen.stdout.fileno()
+            self.popen = subprocess.Popen(self.script, stdout=subprocess.PIPE)
+            self.alive = True
+            return self.fileno
         except ChildProcessError as e:
-            self.popen = None
+            self.alive = False
             sys.stderr.write(f'Error: Could not run \'{self.name}\' script\n')
-            return None
         except FileNotFoundError as e:
-            self.popen = None
-            sys.stderr.write(f'Error: \'{self.script[2:].join(' ')}\' not found\n')
-            return None
+            self.alive = False
+            sys.stderr.write(f'Error: \'{self.script[2:].join(" ")}\' not found\n')
         except ValueError as e:
-            self.popen = None
-            sys.stderr.write(f'{e}')
-            return None
-
+            self.alive = False
+            sys.stderr.write(f'{e}\n')
+        raise ChildProcessError
 
     @staticmethod
     def build_lemonbar_str(modules, sep):
-        left = sep.join(sorted([x for x in modules if x.align == Align.LEFT], key=lambda m: m.order))
-        center = sep.join(sorted([x for x in modules if x.align == Align.CENTER], key=lambda m: m.order))
-        right = sep.join(sorted([x for x in modules if x.align == Align.RIGHT], key=lambda m: m.order))
+        left = sep.join(sorted([x.output for x in modules if x.align == Align.LEFT], key=lambda m: m.order))
+        center = sep.join(sorted([x.output for x in modules if x.align == Align.CENTER], key=lambda m: m.order))
+        right = sep.join(sorted([x.output for x in modules if x.align == Align.RIGHT], key=lambda m: m.order))
+        print([x.output for x in modules])
         if left == sep:
             left = ''
         if center == sep:
@@ -77,6 +95,9 @@ class Module():
             right = ''
         return f'%{{l}}{left}%{{c}}{center}%{{r}}{right}'
 
+
     @staticmethod
-    def find_modules_by_fileno(modules, filenos):
-        return [x for x in modules if x.popen.stdout.fileno() in filenos]
+    def find_modules_by_fileno(modules, fileno):
+        for module in modules:
+            if module.fileno == fileno:
+                return module
