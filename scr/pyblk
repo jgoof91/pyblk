@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import os
+import sys
 import Server
 
 SOCK_PATH = os.getenv('PYBLK_SOCK_ADDR', default='/tmp/pyblk.sock')
@@ -12,6 +13,7 @@ def main():
         server.loop()
     finally:
         server.close()
+        sys.exit(0)
 
 
 if __name__ == '__main__':

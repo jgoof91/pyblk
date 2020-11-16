@@ -11,7 +11,7 @@ class Align(Enum):
 
 
 class Module():
-    def __init__(self, script, interval, signal, align=Align.RIGHT, order=-1):
+    def __init__(self, script, interval=0, signal=0, align=Align.RIGHT, order=0):
         self.script = script
         self.interval = int(interval)
         self.signal = int(signal)
@@ -26,7 +26,7 @@ class Module():
 
 
     def __str__(self):
-        return f'{self.script:10} {self.interval:4} {self.signal:2} {self.align:5} {self.order:2}'
+        return f'{self.script:<10} {self.interval:<4} {self.signal:<2} {self.align:<5} {self.order:<2}'
 
 
     @property
@@ -39,7 +39,9 @@ class Module():
 
     @property
     def is_alive(self):
-        if self.popen.poll() is None:
+        if self.popen is None:
+            self.alive = False
+        elif self.popen.poll() is None:
             self.alive = True
         else:
             self.alive = False
@@ -54,16 +56,18 @@ class Module():
             self.popen.wait(5)
         except TimeoutError as e:
             self.popen.kill()
+            self.popen.wait()
         self.alive = False
 
 
     def read(self):
-        buff = self.popen.stdout.read()
-        if not buff:
+        if self.popen is None:
             return False
-        self.output = buff.decode('UTF-8')
+        out, _ = self.popen.communicate()
+        self.output = out.decode(encoding='UTF-8')
+        self.alive = False
         return True
-    
+
 
     def run(self):
         try:
@@ -78,26 +82,14 @@ class Module():
             sys.stderr.write(f'Error: \'{self.script[2:].join(" ")}\' not found\n')
         except ValueError as e:
             self.alive = False
-            sys.stderr.write(f'{e}\n')
-        raise ChildProcessError
-
-    @staticmethod
-    def build_lemonbar_str(modules, sep):
-        left = sep.join(sorted([x.output for x in modules if x.align == Align.LEFT], key=lambda m: m.order))
-        center = sep.join(sorted([x.output for x in modules if x.align == Align.CENTER], key=lambda m: m.order))
-        right = sep.join(sorted([x.output for x in modules if x.align == Align.RIGHT], key=lambda m: m.order))
-        print([x.output for x in modules])
-        if left == sep:
-            left = ''
-        if center == sep:
-            center = ''
-        if right == sep:
-            right = ''
-        return f'%{{l}}{left}%{{c}}{center}%{{r}}{right}'
+            sys.stderr.write(f'Value Error\n')
 
 
     @staticmethod
     def find_modules_by_fileno(modules, fileno):
         for module in modules:
-            if module.fileno == fileno:
+            if module.fileno == -1:
+                continue
+            elif module.fileno == fileno:
                 return module
+        return None
