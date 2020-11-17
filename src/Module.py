@@ -11,12 +11,12 @@ class Align(Enum):
 
 
 class Module():
-    def __init__(self, script, interval=0, signal=0, align=Align.RIGHT, order=0):
+    def __init__(self, script, interval, signal, align, order):
         self.script = script
-        self.interval = int(interval)
-        self.signal = int(signal)
+        self.interval = interval
+        self.signal = signal
         self.align = align
-        self.order = int(order)
+        self.order = order
 
         self.output = ''
         self.popen = None
@@ -48,7 +48,7 @@ class Module():
         return self.alive
 
 
-    def kill(self):
+    def reap(self):
         if not self.is_alive:
             return
         self.popen.terminate()
@@ -69,9 +69,9 @@ class Module():
         return True
 
 
-    def run(self):
+    def run(self, shell):
         try:
-            self.popen = subprocess.Popen(self.script, stdout=subprocess.PIPE)
+            self.popen = subprocess.Popen([shell, '-c', self.script], stdout=subprocess.PIPE)
             self.alive = True
             return self.fileno
         except ChildProcessError as e:

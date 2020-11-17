@@ -4,6 +4,7 @@ import socket
 import select
 import subprocess
 import shlex
+from Command import Add, Remove
 from Module import Module, Align
 
 class Server():
@@ -25,6 +26,11 @@ class Server():
         self.output = ''
         self.refresh = False
 
+        self.command_dict = {
+                'add': Add.AddCommand(),
+                'remove': Remove.RemoveCommand()
+                }
+
 
     def accept(self):
         conn, addr = self.sock.accept()
@@ -32,42 +38,6 @@ class Server():
         self.conn_table[conn.fileno()] = conn
         self.epoll.register(conn.fileno(), select.EPOLLIN | select.EPOLLET)
 
-
-    def add(self, args):
-        if not args:
-            return b'Error: add not enough arguments'
-        try:
-            module_args, msg = {}, b''
-            optlist, args = getopt.getopt(args, 'c:i:s:o:a:')
-            for opt, arg in optlist:
-                if opt == '-c':
-                    module_args['script'] = arg
-                elif opt == '-i':
-                    module_args['interval'] = arg
-                elif opt == '-s':
-                    module_args['signal'] = arg
-                elif opt == '-o':
-                    module_args['order'] = arg
-                elif opt == '-a':
-                    arg = arg.lower()
-                    if 'l' in arg:
-                        module_args['align'] = Align.LEFT
-                    elif 'c' in arg:
-                        module_args['align'] = Align.CENTER
-                    elif 'r' in arg:
-                        module_args['align'] = Align.RIGHT
-                    else:
-                        module_args['align'] = Align.RIGHT
-
-            if 'script' not in module_args:
-                msg = b'Add Error: script `-s` argument is need'
-            else
-                module = Module(**module_args)
-                self.modules.append(module)
-                self.run_module(module)
-        except getopt.GetoptError as e:
-            msg = b'Error: add wrong arguments'
-        return msg if msg else b'Ok'
 
 
     def command(self, conn):
@@ -81,17 +51,11 @@ class Server():
             except BlockingIOError as e:
                 break
         buff = buff.decode('UTF-8').split('\0')
-        cmd = buff[0].lower()
-        args = buff[1:]
-        if cmd in 'add':
-            ret = self.add(args)
-        elif cmd in 'remove':
-            ret = self.remove(args)
-        elif cmd in 'list':
-            ret = self.list()
-        #elif cmd in 'lemonbar'
-        #   pass
-           # ret = self.lemonbar(args)
+        buff[0] = buff[0].lower()
+        try:
+            ret = self.command_dict[buff[0]].exec(self, buff)
+        except KeyError as e:
+            ret = f'{buff} does not exists\n'.encode()
         send_ret = conn.sendall(ret)
         if send_ret is not None:
             sys.stderr.write('Failed to send data to client\n')
@@ -107,12 +71,15 @@ class Server():
     def recv(self, fileno):
         if fileno in self.conn_table:
             self.command(self.conn_table[fileno])
+            self.epoll.unregister(fileno)
+            self.conn_table[fileno].close()
+            self.conn_table.pop(fileno)
         else:
             module = Module.find_modules_by_fileno(self.modules, fileno)
             if module is None:
                 return
-            ret = module.read()
             self.unregister_module(module)
+            ret = module.read()
             if not self.refresh:
                 self.refresh = ret
 
@@ -128,7 +95,7 @@ class Server():
             self.conn_table.pop(fileno)
         else:
             module = Module.find_modules_by_fileno(self.modules, fileno)
-            module.kill()
+            module.reap()
             self.unregister_module(module)
 
 
@@ -144,14 +111,13 @@ class Server():
         with select.epoll() as self.epoll:
             self.epoll.register(self.sock.fileno(), select.EPOLLIN | select.EPOLLET)
             while self.running:
-                events = self.epoll.poll(timeout=1.0)
+                events = self.epoll.poll(1000)
                 for fileno, event in events:
                     if self.sock.fileno() == fileno:
                         self.accept()
                     elif event & select.EPOLLIN:
                         self.recv(fileno)
                     elif event & select.EPOLLHUP or event & select.EPOLL_RDHUP:
-                        print('hangup')
                         self.hangup(fileno)
                     elif event & select.EPOLLERR:
                         sys.stderr.write(f'{fileno}\n')
@@ -177,26 +143,13 @@ class Server():
 
     def reap_module(self):
         for module in self.modules:
-            module.kill()
-
-
-    def remove(self, args):
-        for arg in args:
-            try:
-                idx = int(arg)
-                if idx >= len(self.modules) or idx <= 0:
-                    return f'Error: {idx} does not exist'.encode()
-                self.unregister_modules(self.modules[idx])
-                self.modules[idx].kill()
-                self.modules.pop(idx)
-            except ValueError as e:
-                return f'Error: {arg} is not a int'.encode()
+            module.reap()
 
 
     def run_module(self, module):
         if module.is_alive:
             return
-        module.run()
+        module.run(self.shell)
         self.register_module(module)
 
 
