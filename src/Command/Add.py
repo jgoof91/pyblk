@@ -12,10 +12,10 @@ class AddCommand(Command.Command):
         self.subparser.add_argument('-o', '--order', type=int, dest='order', default=0, help='The placement of the module output according to the align.')
 
 
-    def exec(self, server, args):
+    def exec(self, args, **kwargs):
         parse_args = Command.Command.PARSER.parse_args(args)
         module = Module(parse_args.command, parse_args.interval, parse_args.signal, parse_args.align, parse_args.order)
-        server.modules.append(module)
-        module.run(server.shell)
-        server.register_module(module)
+        modules.append(module)
+        module.exec(shell)
+        epoll.register(module)
         return b'Ok'

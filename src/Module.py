@@ -1,6 +1,7 @@
 import sys
 import subprocess
-import select
+import json
+import csv
 from enum import Enum
 
 
@@ -69,20 +70,46 @@ class Module():
         return True
 
 
-    def run(self, shell):
+    def exec(self, shell):
         try:
             self.popen = subprocess.Popen([shell, '-c', self.script], stdout=subprocess.PIPE)
             self.alive = True
             return self.fileno
         except ChildProcessError as e:
             self.alive = False
-            sys.stderr.write(f'Error: Could not run \'{self.name}\' script\n')
+            sys.stderr.write(f'Error: Could not execute \'{self.name}\' script\n')
         except FileNotFoundError as e:
             self.alive = False
             sys.stderr.write(f'Error: \'{self.script[2:].join(" ")}\' not found\n')
         except ValueError as e:
             self.alive = False
             sys.stderr.write(f'Value Error\n')
+
+
+    def csv(self, sep=','):
+        d = [
+                self.script,
+                self.interval,
+                self.signal,
+                self.align,
+                self.order,
+                self.alive,
+                self.register
+                ]
+        return sep.join(d) + '\n'
+
+
+    def json(self):
+        d = {
+                'script': self.script,
+                'interval': self.interval,
+                'signal': self.signal,
+                'align': self.align,
+                'order': self.order,
+                'status': self.alive,
+                'register': self.register
+                } 
+        return json.dumps(d)
 
 
     @staticmethod

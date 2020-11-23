@@ -1,11 +1,11 @@
 import sys
 import getopt
 import socket
-import select
 import subprocess
 import shlex
 from Command import Add, Remove
 from Module import Module, Align
+from Epoll import Epoll
 
 class Server():
     def __init__(self, SOCK_ADDR, SHELL):
@@ -28,7 +28,8 @@ class Server():
 
         self.command_dict = {
                 'add': Add.AddCommand(),
-                'remove': Remove.RemoveCommand()
+                'remove': Remove.RemoveCommand(),
+#                'list': List.ListCommand()
                 }
 
 
@@ -36,28 +37,23 @@ class Server():
         conn, addr = self.sock.accept()
         conn.setblocking(False)
         self.conn_table[conn.fileno()] = conn
-        self.epoll.register(conn.fileno(), select.EPOLLIN | select.EPOLLET)
+        self.epoll.register(conn.fileno())
 
 
-
-    def command(self, conn):
-        buff, ret = b'', ''
-        while True:
-            try:
-                tmp = conn.recv(1024)
-                if not tmp:
-                    break
-                buff = b''.join([buff, tmp])
-            except BlockingIOError as e:
-                break
-        buff = buff.decode('UTF-8').split('\0')
-        buff[0] = buff[0].lower()
+    def command(self, fileno, buff):
+        ret = b''
+        conn = self.conn_table[fileno]
         try:
-            ret = self.command_dict[buff[0]].exec(self, buff)
+            if 'add' in buff[0]:
+                ret = self.command_dict['add'].exec(buff, modules=self.modules, epoll=self.epoll, shell=self.shell)
+            elif 'remove' in buff[0]:
+                ret = self.command_dict['remove'].exec(buff, modules=self.modules, epoll=self.epoll)
+            #  elif 'list' in buff[0]:
+                #  ret = self.command_dict['list'].exec(buff, modules=self.modules)
         except KeyError as e:
             ret = f'{buff} does not exists\n'.encode()
-        send_ret = conn.sendall(ret)
-        if send_ret is not None:
+        ret = conn.sendall(ret)
+        if ret is not None:
             sys.stderr.write('Failed to send data to client\n')
 
 
@@ -68,17 +64,39 @@ class Server():
         self.reap_module()
 
 
+    def read_socket(self, fileno):
+        buff = b''
+        conn = self.conn_table[fileno]
+        while True:
+            try:
+                tmp = conn.recv(1024)
+                print(tmp)
+                if not tmp:
+                    break
+                buff = b''.join([buff, tmp])
+            except BlockingIOError as e:
+                break
+        print(buff)
+        buff = buff.decode('UTF-8').split('\0')
+        buff[0] = buff[0].lower()
+        return buff
+
+
     def recv(self, fileno):
         if fileno in self.conn_table:
-            self.command(self.conn_table[fileno])
-            self.epoll.unregister(fileno)
-            self.conn_table[fileno].close()
-            self.conn_table.pop(fileno)
+            try:
+                buff = self.read_socket(fileno)
+                self.command(fileno, buff)
+                self.epoll.unregister(fileno)
+                self.conn_table[fileno].close()
+                self.conn_table.pop(fileno)
+            except Exception as e:
+                print(f'{e}')
         else:
             module = Module.find_modules_by_fileno(self.modules, fileno)
             if module is None:
                 return
-            self.unregister_module(module)
+            self.epoll.unregister(module)
             ret = module.read()
             if not self.refresh:
                 self.refresh = ret
@@ -96,7 +114,7 @@ class Server():
         else:
             module = Module.find_modules_by_fileno(self.modules, fileno)
             module.reap()
-            self.unregister_module(module)
+            self.epoll.unregister(module)
 
 
     def list(self):
@@ -108,8 +126,8 @@ class Server():
 
     def loop(self):
         count = 0
-        with select.epoll() as self.epoll:
-            self.epoll.register(self.sock.fileno(), select.EPOLLIN | select.EPOLLET)
+        with Epoll() as self.epoll:
+            self.epoll.register(self.sock.fileno())
             while self.running:
                 events = self.epoll.poll(1000)
                 for fileno, event in events:
@@ -127,33 +145,19 @@ class Server():
                     self.draw()
 
 
-    def register_module(self, module):
-        if module.register:
-            return
-        self.epoll.register(module.fileno, select.EPOLLIN | select.EPOLLET)
-        module.register = True
-
-
-    def unregister_module(self, module):
-        if not module.register:
-            return
-        self.epoll.unregister(module.fileno)
-        module.register = False
-
-
     def reap_module(self):
         for module in self.modules:
             module.reap()
 
 
-    def run_module(self, module):
+    def exec_module(self, module):
         if module.is_alive:
             return
-        module.run(self.shell)
-        self.register_module(module)
+        module.exec(self.shell)
+        self.epoll.register(module)
 
 
     def update_modules(self, time):
         for module in self.modules:
             if module.interval != 0 and time % module.interval == 0:
-                self.run_module(module)
+                self.exec_module(module)

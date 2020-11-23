@@ -7,12 +7,12 @@ class RemoveCommand(Command.Command):
         self.subparser.add_argument('-i', '--index', type=int, dest='index', help='Index of the module to remove. To get index run the list command.')
 
 
-    def exec(self, server, args):
+    def exec(self, args, **kwargs):
         parse_args = Command.PARSER.parse_args(args)
         if parse_args.index >= len(server.modules) or parse_args < 0:
             return b'index is greater or less than number of modules\n'
-        module = server.modules[parse_args.index]
-        server.unregister_module(module)
+        module = modules[parse_args.index]
+        epoll.unregister(module)
         module.reap()
         modules.pop(parse_args.index)
         return b'Ok\n'

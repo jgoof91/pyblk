@@ -10,5 +10,5 @@ class Command():
         self.subparser = Command.SUBPARSERS.add_parser(name)
 
 
-    def exec(self, server, args):
+    def exec(self, args, **kwargs):
         pass

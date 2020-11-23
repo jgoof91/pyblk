@@ -17,7 +17,7 @@ try:
         buff = b''.join([buff, tmp])
     print(buff.decode('UTF-8'))
 except socket.error as e:
-    sys.stderr.write(f'Can\'t connect to {SOCK_ADDR}\n')
+    sys.stderr.write(f'{e}\n')
 finally:
     sock.close()
 
